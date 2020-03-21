@@ -1,0 +1,16 @@
+<MyBoxLayout@BoxLayout>:
+    canvas.before:
+        Color:
+            rgba: 0.86, 0.9, 0.95, 1
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<MainScreen>:
+    MyBoxLayout:
+        Label:
+            id: message
+            color: 0, 0, 0, 1
+            text: "テキストファイルとExcelファイルをドラッグ&ドロップしてください\n(別々でも同時でもドラッグ&ドロップ可能です)"
+
+
