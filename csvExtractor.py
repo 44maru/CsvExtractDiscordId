@@ -1,6 +1,7 @@
 import logging.config
 import os
 import sys
+from collections import OrderedDict
 from xlrd import open_workbook
 
 LOG_CONF = "./logging.conf"
@@ -24,22 +25,8 @@ if hasattr(sys, "_MEIPASS"):
     resource_add_path(sys._MEIPASS)
 
 EMPTY = ""
-INDEX_TWITTER = 16
-INDEX_EMAIL = 8
-INDEX_FIRST_NAME = 3
-INDEX_LAST_NAME = 2
-INDEX_ADDRESS = 7
-INDEX_POST_CODE = 4
-INDEX_CITY = 6
-INDEX_REGION = 5
-INDEX_PHONE = 8
-INDEX_PAY_TYPE = 13
-INDEX_CARD_NUMBER = 14
-INDEX_CARD_LIMIT_MONTH = 15
-INDEX_CARD_LIMIT_YEAR = 16
-INDEX_CARD_CVV = 17
-INDEX_ITEM_NO = 4
-INDEX_ITEM_SIZE = 2
+INDEX_TWITTER = 5
+INDEX_EMAIL = 1
 
 ID_MESSAGE = "message"
 
@@ -52,18 +39,16 @@ EXT_XLS = ".xlsx"
 EXT_XLSX = ".xlsx"
 EXT_XLSM = ".xlsm"
 
-KEY_ORDER_NUMBER = "注文オーダー番号"
-KEY_MAIL_ADDRESS = "購入者メールアドレス"
-KEY_ITEM_NAME = "商品名"
+KEY_MAIL_ADDRESS = "メールアドレス"
 
 CONFIG_TXT = "./config.txt"
 CONFIG_DICT = {}
 CONFIG_KEY_OUTPUT_CSV_NAME = "OUTPUT_CSV_NAME"
 CONFIG_KEY_OUTPUT_CSV_CHAR_SET = "OUTPUT_CSV_CHAR_SET"
 CONFIG_KEY_INPUT_TEXT_CHAR_SET = "INPUT_TEXT_CHAR_SET"
-ORDER_ITEM_LIST_DICT = {}
-ORDER_NUM_DICT = {}
-TWITTER_DICT = {}
+MAIL_ADDRESS_DICT_FROM_TXT = OrderedDict()
+DISCORD_ID_DICT_FROM_EXCEL = {}
+MAIL_ADDRESS_DICT_FROM_EXCEL = {}
 
 excel_proc_line_num = 0
 text_proc_line_num = 0
@@ -98,32 +83,27 @@ class MainScreen(Screen):
 
     def dump_csv_core(self):
         out_file_name = CONFIG_DICT[CONFIG_KEY_OUTPUT_CSV_NAME]
-        twitter_item_dict = self.mk_twitter_item_dict()
-        self.dump_twitter_and_item_list(out_file_name, twitter_item_dict)
+        self.dump_twitter_and_item_list(out_file_name)
         self.disp_messg("{}を出力しました".format(out_file_name))
 
     @staticmethod
-    def dump_twitter_and_item_list(out_file_name, twitter_item_dict):
+    def dump_twitter_and_item_list(out_file_name):
         with open(out_file_name, "w", encoding=CONFIG_DICT[CONFIG_KEY_OUTPUT_CSV_CHAR_SET]) as f:
-            for item in sorted(twitter_item_dict.items()):
-                f.write("{}".format(item[0]))
-                for item_name in sorted(item[1]):
-                    f.write(",{}\n".format(item_name))
+            already_dumped_discord_id_dict = {}
+            for mail in MAIL_ADDRESS_DICT_FROM_TXT.keys():
+                discord_id = MAIL_ADDRESS_DICT_FROM_EXCEL.get(mail)
+                if discord_id is None:
+                    log.warn("アドレス {} はExcelファイルに存在しません。処理をスキップします。".format(mail))
+                    continue
+                if discord_id in already_dumped_discord_id_dict:
+                    continue
 
-    @staticmethod
-    def mk_twitter_item_dict():
-        twitter_item_dict = {}
-        for item in ORDER_ITEM_LIST_DICT.items():
-            mail = item[0]
-            order_item_list = item[1]
-            twitter = TWITTER_DICT.get(mail)
-            if twitter is None:
-                log.warn("アドレス {} はExcelファイルに存在しません。処理をスキップします。".format(mail))
-            else:
-                list = twitter_item_dict.get(twitter, [])
-                list.extend(order_item_list)
-                twitter_item_dict[twitter] = list
-        return twitter_item_dict
+                f.write("{}".format(discord_id))
+                for mail in DISCORD_ID_DICT_FROM_EXCEL[discord_id]:
+                    f.write(",{}\n".format(mail))
+                
+                already_dumped_discord_id_dict[discord_id] = True
+
 
     def parse_excel_file(self, file_path):
         global excel_proc_line_num
@@ -199,10 +179,10 @@ def load_config():
 
 
 def parse_excel_file_core(file_path):
-    global TWITTER_DICT
+    global MAIL_ADDRESS_DICT_FROM_EXCEL
     global excel_proc_line_num
 
-    TWITTER_DICT = {}
+    MAIL_ADDRESS_DICT_FROM_EXCEL = {}
     excel_proc_line_num = 1
 
     workbook = open_workbook(file_path)
@@ -211,18 +191,21 @@ def parse_excel_file_core(file_path):
         row = sheet.row(i)
         mail = row[INDEX_EMAIL].value
         twitter = row[INDEX_TWITTER].value
-        if not (mail in TWITTER_DICT):
-            TWITTER_DICT[mail] = twitter
+        if not (mail in MAIL_ADDRESS_DICT_FROM_EXCEL):
+            mail_list = DISCORD_ID_DICT_FROM_EXCEL.get(twitter, [])
+            mail_list.append(mail)
+            DISCORD_ID_DICT_FROM_EXCEL[twitter] = mail_list
+            MAIL_ADDRESS_DICT_FROM_EXCEL[mail] = twitter
+        else:
+            log.warn("メールアドレス {} はすでに読込済みのため、読込をスキップします。ファイル={} 行番号={}".format(mail, file_path, excel_proc_line_num))
 
         excel_proc_line_num += 1
 
 
 def parse_text_file_core(file_path):
-    global ORDER_NUM_DICT
-    global ORDER_ITEM_LIST_DICT
+    global MAIL_ADDRESS_DICT_FROM_TXT
     global text_proc_line_num
-    ORDER_NUM_DICT = {}
-    ORDER_ITEM_LIST_DICT = {}
+    MAIL_ADDRESS_DICT_FROM_TXT = OrderedDict()
     text_proc_line_num = 1
     is_item_line = False
     is_mail_line = False
@@ -230,42 +213,17 @@ def parse_text_file_core(file_path):
 
     for line in open(file_path, "r", encoding=CONFIG_DICT[CONFIG_KEY_INPUT_TEXT_CHAR_SET]):
         line = line[:-1]
-
-        if is_item_line:
-            item_name = line
-
-        elif is_mail_line:
+        if is_mail_line:
             mail_address = line
-
-        elif is_order_num_line:
-            order_num = line
-            if not (order_num in ORDER_NUM_DICT):
-                order_list = ORDER_ITEM_LIST_DICT.get(mail_address, [])
-                order_list.append(item_name)
-                ORDER_ITEM_LIST_DICT[mail_address] = order_list
-                ORDER_NUM_DICT[order_num] = True
+            if not (mail_address in MAIL_ADDRESS_DICT_FROM_TXT):
+                MAIL_ADDRESS_DICT_FROM_TXT[mail_address] = True
             else:
-                log.warn("注文オーダー番号 {} はすでに読込済みのため、読込をスキップします。行番号={}".format(order_num, text_proc_line_num))
+                log.warn("メールアドレス {} はすでに読込済みのため、読込をスキップします。ファイル={} 行番号={}".format(mail_address, file_path, text_proc_line_num))
 
-        if line == KEY_ITEM_NAME:
-            is_item_line = True
-            is_mail_line = False
-            is_order_num_line = False
-
-        elif line == KEY_MAIL_ADDRESS:
-            is_item_line = False
+        if line == KEY_MAIL_ADDRESS:
             is_mail_line = True
-            is_order_num_line = False
-
-        elif line == KEY_ORDER_NUMBER:
-            is_item_line = False
-            is_mail_line = False
-            is_order_num_line = True
-
         else:
-            is_item_line = False
             is_mail_line = False
-            is_order_num_line = False
 
         text_proc_line_num += 1
 
