@@ -11,6 +11,8 @@ pypiwin32 = "*"
 kivy-deps-sdl2 = "*"
 kivy-deps-glew = "*"
 xlrd = "*"
+pipfile = "*"
+pyinstaller = "==3.4"
 
 [requires]
 python_version = "3.6"
