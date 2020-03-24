@@ -100,7 +100,8 @@ class MainScreen(Screen):
 
                 f.write("{}".format(discord_id))
                 for mail in DISCORD_ID_DICT_FROM_EXCEL[discord_id]:
-                    f.write(",{}\n".format(mail))
+                    if mail in MAIL_ADDRESS_DICT_FROM_TXT:
+                        f.write(",{}\n".format(mail))
                 
                 already_dumped_discord_id_dict[discord_id] = True
 
